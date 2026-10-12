@@ -1,3 +1,11 @@
+// 由页面内容脚本获取所属标签页，悬浮面板始终操作该页面。
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'GetTimerTab' && sender.tab
+        && /^https:\/\/www\.bilibili\.com\/video\//.test(sender.url || '')) {
+        sendResponse({ tabId: sender.tab.id });
+    }
+});
+
 /* 
 * 创建InsertMarker
 */

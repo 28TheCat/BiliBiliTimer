@@ -25,12 +25,19 @@
             ],
             "js": [
                 "./js/content.js",
-                "./js/calTime.js"
+                "./js/calTime.js",
+                "./js/floating.js"
             ]
         }
     ],
     "host_permissions": [
         "*://api.bilibili.com/*"
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": ["popup.html"],
+            "matches": ["https://www.bilibili.com/*"]
+        }
     ],
     "options_page": "options.html",
     "background": {

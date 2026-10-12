@@ -146,10 +146,10 @@ function insertMarker(p_mark, bvid, readMarker = null) { // 视频集号，视�
 function drawStoreMarker() {
     // 数据的结构为：{bvid:map({p:1, marker:'✨'}, {p:2, marker:'✨'})}
     chrome.storage.sync.get('BiliTimer_marker', function (data) {
-        let markers = data.BiliTimer_marker;
-        const bvid = window.location.href.match(/BV\w+/)[0];
+        let markers = data.BiliTimer_marker || {};
+        const bvid = window.location.href.match(/BV\w+/)?.[0];
         // 如果marker中没有该bvid，则直接返回
-        if (!markers[bvid]) return;
+        if (!bvid || !markers[bvid]) return;
         // 遍历该bvid的marker中的p和marker
         for (let [p, mark] of markers[bvid]) {
             insertMarker(p, bvid, mark)
