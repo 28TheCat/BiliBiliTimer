@@ -1,161 +1,154 @@
-var btn_cal = document.getElementById('btn-cal');
-var btn_back = document.getElementById('btn-back');
-var stime = document.getElementById('showtime');
-var startp = document.getElementById('p_start');
-var endp = document.getElementById('p_end');
-var ranger = document.getElementById('customRange2');
-var progress = document.getElementById('prgs');
+const btn_cal = document.getElementById('btn-cal');
+const btn_back = document.getElementById('btn-back');
+const stime = document.getElementById('showtime');
+const startp = document.getElementById('p_start');
+const endp = document.getElementById('p_end');
+const ranger = document.getElementById('customRange2');
+const progress = document.getElementById('prgs');
+const mode = document.getElementById('cal-mode');
+let context = null;
 
-startp.addEventListener('focus', function () { this.select() })
-endp.addEventListener('focus', function () { this.select() })
+startp.addEventListener('focus', function () { this.select(); });
+endp.addEventListener('focus', function () { this.select(); });
 
-let p = 1; // 当前视频集数
-var length = 1; // 视频长度
-let section_idx = 0; // 二级合集的索引
-
-// 初始化输入框的值 & progress
-chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-    // https://www.bilibili.com/video/BVxxx/?p=16&vd_source=xxx
-    const url = tabs[0].url;
-    // 获取url中的p参数，正则表达式：p=数字
-    p = url.match(/p=(\d+)/);
-    // 获取p中的数字
-    p = p ? parseInt(p[1]) : 0;
-    // 初始化输入框的值
-
-    // 获取视频总集数和进度 设置range的max值
-    // chrome.tabs.sendMessage(tabs[0].id, { action: "GetLengthandProgress", p_now: p }).then(res => {
-    //     length = parseInt(res[0]);
-    //     ranger.max = length;
-    //     ranger.value = endp.value;
-    //     let width = res[1]
-    //     progress.style.width = `${width}%`
-    //     progress.setAttribute('aria-valuenow', width)
-    //     document.getElementById('prgs_info').innerHTML = `当前进度... <span class="badge bg-primary bg-opacity-75" style="font-size:11px">${width}%</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;集数进度... <span class="badge bg-success bg-opacity-75" style="font-size:11px">${p == 0 ? 1 : p}/${length}</span>` // 字符串中的空格用&nbsp;代替
-    // })
-
-    const bvid = tabs[0].url.match(/BV(\w+)/)[0];
-    chrome.tabs.sendMessage(tabs[0].id, { action: "GetVideoInfo", bvid: bvid }).then(res => {
-        const { vtype, data } = res;
-        if (vtype === 1) {
-            stime.value = '就一个视频有啥好算的(°ー°〃)';
-            startp.value = 1;
-            endp.value = 1;
-            ranger.max = 1;
-            ranger.value = 1;
-            document.querySelector('.progress').style.display = 'none';
-            document.getElementById('prgs_info').style.display = 'none';
-            return true;
-        } else if (vtype === 2) {
-            length = data.videos;
-            p = p == 0 ? 1 : p;
-        } else {
-            for (let sectIdx = 0; sectIdx < data.ugc_season.sections.length; sectIdx++) {
-                const section = data.ugc_season.sections[sectIdx];
-                for (let idx = 0; idx < section.episodes.length; idx++) {
-                    if (section.episodes[idx].aid === data.aid) {
-                        length = section.episodes.length; // 二级合集的总集数
-                        p = idx + 1;            // 当前视频在二级合集中的集数
-                        section_idx = sectIdx;  // 二级合集的索引
-                        console.log('section_idx:', sectIdx, 'p:', p);
-                        break;
-                    }
-                }
-            }
-        }
-        // 初始化输入框的值
-        if (p) {
-            startp.value = p;
-            endp.value = endp.value ? endp.value : p + 1;
-        }
-
-        ranger.max = length;
-        ranger.value = endp.value;
-
-        chrome.tabs.sendMessage(tabs[0].id,
-            { action: "GetProgress", bvid: bvid, section_idx: section_idx, p_now: p, len: length }
-        ).then(width => {
-            progress.style.width = `${width}%`
-            progress.setAttribute('aria-valuenow', width)
-            document.getElementById('prgs_info').innerHTML = `当前进度... <span class="badge bg-primary bg-opacity-75" style="font-size:11px">${width}%</span> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;集数进度... <span class="badge bg-success bg-opacity-75" style="font-size:11px">${p == 0 ? 1 : p}/${length}</span>` // 字符串中的空格用&nbsp;代替
-        })
-
-        console.log('open popup', res);
-    })
-
-
-});
-
-// 绑定range的input事件
-if (ranger) {
-    ranger.addEventListener('input', function () {
-        endp.value = parseInt(this.value);
-        // ranger的颜色随着值的变化而变化
-        // this.style.background = `linear-gradient(to right, #007bff 0%, #007bff ${this.value / this.max * 100}%, #dee2e6 ${this.value / this.max * 100}%, #dee2e6 100%);`;
-    })
-}
-// 绑定cal按钮的click事件
-if (btn_cal) {
-    btn_cal.addEventListener('click', function () {
-        // 获取popup.html输入框的值，转换为int类型
-        let p1 = parseInt(startp.value);
-        let p2 = parseInt(endp.value);
-
-        // 如果p1>p2,则交换p1和p2的值
-        if (p1 > p2) {
-            let temp = p1;
-            p1 = p2;
-            p2 = temp;
-        }
-        // 如果p1或p2小于1，则将其置为1
-        if (p1 < 1) {
-            startp.value = 1;
-            p1 = 1;
-        } else if (p1 > length) {
-            startp.value = length;
-            p1 = length;
-        }
-        if (p2 < 1) {
-            endp.value = 1;
-            p2 = 1;
-        } else if (p2 > length) {
-            endp.value = length;
-            p2 = length;
-        }
-        chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-            const bvid = tabs[0].url.match(/BV(\w+)/)[0];
-            chrome.tabs.sendMessage(tabs[0].id, { action: "GetDuration", bvid: bvid, p1: p1, p2: p2, section_idx: section_idx }).then(res => {
-                stime.value = `${res[0] ? res[0] + 'h ' : ''}${res[1] ? res[1] + 'min ' : ''}${res[2] ? res[2] + 's' : ''}`; // res中为0的就不显示
-            }).catch(err => {
-                console.error(err)
-            });
-        });
+// 每次点击重新读取页面状态，不启动定时器或监听播放事件。
+async function readContext() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !/^https:\/\/www\.bilibili\.com\/video\//.test(tab.url || '')) {
+        throw new Error('请在 B 站视频播放页使用');
+    }
+    const snapshot = await chrome.tabs.sendMessage(tab.id, { action: 'GetPlaybackState' });
+    if (!snapshot?.bvid) throw new Error('无法识别当前视频，请刷新视频页后重试');
+    const result = await chrome.tabs.sendMessage(tab.id, {
+        action: 'GetVideoInfo', bvid: snapshot.bvid
     });
-}
-// 还原按钮
-if (btn_back) {
-    btn_back.addEventListener('click', function () {
-        startp.value = p;
-        endp.value = p + 1;
-        ranger.value = p + 1;
-    })
+    if (!result?.data) throw new Error('无法获取视频时长，请重试');
+    // 请求期间可能发生切集，使用最新状态；跨 BV 切换时请重新计算。
+    const playback = await chrome.tabs.sendMessage(tab.id, { action: 'GetPlaybackState' });
+    if (!playback || playback.bvid !== snapshot.bvid) throw new Error('视频已切换，请重新计算');
+    const { vtype, data } = result;
+    let durations;
+    let current = 1;
+    let group = '';
+    if (vtype === 2) {
+        durations = data.pages.map(page => page.duration);
+        current = playback.page;
+    } else if (vtype === 3) {
+        const section = data.ugc_season.sections.find(section =>
+            section.episodes.some(episode => episode.aid === data.aid));
+        if (!section) throw new Error('无法识别当前合集分组');
+        durations = section.episodes.map(episode => episode.page.duration);
+        current = section.episodes.findIndex(episode => episode.aid === data.aid) + 1;
+        group = section.title || '';
+    } else {
+        durations = [data.duration];
+    }
+    if (!durations.length || durations.some(seconds => !Number.isFinite(seconds) || seconds < 0)
+        || current < 1 || current > durations.length) {
+        throw new Error('视频时长或集数无效，请刷新视频页后重试');
+    }
+    return { durations, current, playback, group, bvid: playback.bvid };
 }
 
-// 在页面加载时，从存储中获取数据并将其写入粘贴板
-document.addEventListener('DOMContentLoaded', () => {
-    chrome.storage.local.get('clipboardData', result => {
-        var clipboardData = result.clipboardData;
-        if (clipboardData) {
-            // writeToClipboard(clipboardData);
-            endp.value = clipboardData;
-            chrome.storage.local.remove('clipboardData'); // 删除已写入粘贴板的数据
-            // btn_cal.click();
+function clampEpisode(value, fallback) {
+    const number = Number.parseInt(value, 10);
+    return Math.min(context.durations.length, Math.max(1, Number.isFinite(number) ? number : fallback));
+}
+
+function formatTime(seconds) {
+    seconds = Math.ceil(Math.max(0, seconds));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor(seconds % 3600 / 60);
+    const rest = seconds % 60;
+    return [hours ? `${hours}h` : '', minutes ? `${minutes}min` : '',
+        rest || (!hours && !minutes) ? `${rest}s` : ''].filter(Boolean).join(' ');
+}
+
+function updateMode() {
+    startp.disabled = mode.value === 'remaining';
+    document.getElementById('mode-info').textContent = mode.value === 'remaining'
+        ? '从当前播放位置计算到最后一集，可修改结束集。'
+        : '计算起始集到结束集的完整时长，包含首尾集。';
+}
+
+function updateProgress() {
+    const { durations, current, playback, group } = context;
+    const total = durations.reduce((sum, seconds) => sum + seconds, 0);
+    const done = durations.slice(0, current - 1).reduce((sum, seconds) => sum + seconds, 0)
+        + (playback.ready ? Math.min(durations[current - 1], playback.currentTime) : 0);
+    const width = total ? Math.min(100, done / total * 100).toFixed(2) : '0.00';
+    progress.style.width = `${width}%`;
+    progress.setAttribute('aria-valuenow', width);
+    document.getElementById('prgs_info').textContent =
+        `当前进度 ${width}% · 第 ${current}/${durations.length} 集${group ? ` · ${group}` : ''}`;
+}
+
+async function calculate(reset = false, quickEnd = null) {
+    const controls = [btn_cal, btn_back, mode, startp, endp, ranger];
+    controls.forEach(control => { control.disabled = true; });
+    stime.value = mode.value === 'remaining' ? '正在读取播放进度' : '正在读取视频时长';
+    try {
+        const previous = context;
+        context = await readContext();
+        const { durations, current, playback } = context;
+        const count = durations.length;
+        startp.max = endp.max = ranger.max = count;
+        if (reset || (previous && (previous.bvid !== context.bvid || previous.group !== context.group))) {
+            startp.value = current;
+            endp.value = count;
         }
-    });
-});
+        if (quickEnd !== null) endp.value = quickEnd;
+        let first = clampEpisode(startp.value, current);
+        let last = clampEpisode(endp.value, count);
+        if (mode.value === 'remaining') {
+            first = current;
+            last = Math.max(current, last);
+        } else if (first > last) {
+            [first, last] = [last, first];
+        }
+        startp.value = first;
+        endp.value = ranger.value = last;
+        ranger.min = endp.min = mode.value === 'remaining' ? current : 1;
+        updateProgress();
+        if (mode.value === 'remaining' && !playback.ready) {
+            stime.value = '正在读取播放进度，请稍后点击计算';
+            return;
+        }
+        let seconds = durations.slice(first - 1, last).reduce((sum, value) => sum + value, 0);
+        if (mode.value === 'remaining') {
+            // 当前集以播放器真实时长为准，后续各集使用 API 时长。
+            seconds += Math.max(0, playback.duration - playback.currentTime) - durations[current - 1];
+        }
+        stime.value = formatTime(seconds);
+    } catch (error) {
+        console.error(error);
+        stime.value = error.message?.includes('Receiving end does not exist')
+            ? '请刷新视频页后重试' : (error.message || '读取失败，请重试');
+    } finally {
+        controls.forEach(control => { control.disabled = false; });
+        updateMode();
+    }
+}
 
-// Version info
-let manifest = chrome.runtime.getManifest();
-let version = manifest.version;
-document.getElementById('version').innerHTML = 'v' + version;
-document.getElementById('author').innerHTML = 'by wyy'
+ranger.addEventListener('input', function () { endp.value = this.value; });
+btn_cal.addEventListener('click', () => calculate());
+btn_back.addEventListener('click', () => {
+    mode.value = 'remaining';
+    calculate(true);
+});
+mode.addEventListener('change', () => calculate(true));
+
+async function initialize() {
+    try {
+        // 保留右键“计算到此时长”的目标，默认仍从当前播放位置开始。
+        const { clipboardData } = await chrome.storage.local.get('clipboardData');
+        if (clipboardData) await chrome.storage.local.remove('clipboardData');
+        await calculate(true, clipboardData || null);
+    } catch (error) {
+        stime.value = error.message || '初始化失败，请重试';
+    }
+}
+
+document.getElementById('version').textContent = 'v' + chrome.runtime.getManifest().version;
+document.getElementById('author').textContent = 'by wyy';
+initialize();

@@ -15,8 +15,7 @@
         "tabs",
         "contextMenus",
         "storage",
-        "notifications",
-        "*://api.bilibili.com/*"
+        "notifications"
     ],
     "content_scripts": [
         {

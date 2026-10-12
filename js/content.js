@@ -18,6 +18,22 @@ window.onload = function () {
 //监听扩展程序进程或内容脚本发送的请求
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     switch (request.action) {
+        case "GetPlaybackState": {
+            const url = new URL(window.location.href);
+            const video = document.querySelector(
+                '#bilibili-player video, #bilibili-player bwp-video, #bilibiliPlayer video, #bilibiliPlayer bwp-video'
+            ) || document.querySelector('video, bwp-video');
+            sendResponse({
+                bvid: url.pathname.match(/BV\w+/)?.[0],
+                page: Math.max(1, Number.parseInt(url.searchParams.get('p'), 10) || 1),
+                ready: Boolean(video && video.readyState >= 1 && !video.seeking
+                    && Number.isFinite(video.duration) && video.duration > 0
+                    && Number.isFinite(video.currentTime)),
+                currentTime: video && Number.isFinite(video.currentTime) ? video.currentTime : 0,
+                duration: video && Number.isFinite(video.duration) ? video.duration : 0
+            });
+            break;
+        }
         case "GetProgress":
             (async () => {
                 if (request.p_now == null || request.p_now <= 1) {
@@ -38,9 +54,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return true;
         case "GetVideoInfo":
             (async () => {
-                const res = await getVideoInfo(request.bvid)
-                console.log('Bilibili video Timer - video info received:', res);
-                sendResponse(res);
+                try {
+                    const res = await getVideoInfo(request.bvid)
+                    console.log('Bilibili video Timer - video info received:', res);
+                    sendResponse(res);
+                } catch (error) {
+                    console.error(error);
+                    sendResponse({ error: '无法获取视频信息，请重试' });
+                }
             })();
             return true;
         case "GetDuration":
