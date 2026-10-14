@@ -3,9 +3,11 @@ const btn_back = document.getElementById('btn-back');
 const stime = document.getElementById('showtime');
 const startp = document.getElementById('p_start');
 const endp = document.getElementById('p_end');
-const ranger = document.getElementById('customRange2');
+const endRange = document.getElementById('endRange');
+const rangeLabel = document.getElementById('rangeLabel');
 const progress = document.getElementById('prgs');
 let isCustomRange = false;
+let activeEndpoint = 'end';
 let context = null;
 let pendingUrl = null;
 // 仅在面板生命周期内保存，不增加存储写入或网络请求。
@@ -16,6 +18,16 @@ const hostTabId = Number(panelParams.get('tabId'));
 
 startp.addEventListener('focus', function () { this.select(); });
 endp.addEventListener('focus', function () { this.select(); });
+
+function selectEndpoint(endpoint) {
+    activeEndpoint = endpoint;
+    rangeLabel.textContent = `滑动选择${endpoint === 'start' ? '起始' : '结束'}集`;
+    const selectedInput = endpoint === 'start' ? startp : endp;
+    if (context) endRange.value = clampEpisode(selectedInput.value,
+        endpoint === 'start' ? context.current : context.durations.length);
+}
+startp.addEventListener('focus', () => selectEndpoint('start'));
+endp.addEventListener('focus', () => selectEndpoint('end'));
 
 // 每次点击重新读取页面状态，不启动定时器或监听播放事件。
 async function readContext() {
@@ -142,25 +154,34 @@ function updateEpisodeProgress(url) {
         || durations.some(seconds => !Number.isFinite(seconds) || seconds < 0)) {
         progress.style.width = '0%';
         progress.setAttribute('aria-valuenow', 0);
-        document.getElementById('prgs_info').textContent = '视频已切换，请点击计算获取进度';
-        stime.value = '视频已切换，请点击计算';
+        // 新视频不在缓存内时自动读取一次；同一列表切集走下面的缓存计算。
+        document.getElementById('prgs_info').textContent = '正在读取新视频进度';
+        calculate(true);
         return;
     }
     const previousRangeKey = rangeKey();
     if (isCustomRange) rememberCustomRange();
     context = { ...context, bvid, current, durations, group,
         playback: { ready: false, currentTime: 0 } };
-    startp.max = endp.max = ranger.max = durations.length;
-    stime.value = '视频已切换，请点击计算';
+    startp.max = endp.max = endRange.max = durations.length;
     if (!isCustomRange) {
         startp.value = current;
-        endp.value = ranger.value = durations.length;
-        stime.value = '视频已切换，请点击计算剩余时长';
+        endp.value = endRange.value = durations.length;
+        document.getElementById('mode-info').textContent =
+            '已按本集开头计算到最后一集；点击计算可读取当前播放位置。';
     } else if (rangeKey() !== previousRangeKey) {
         const saved = customRanges.get(rangeKey());
         startp.value = saved ? clampEpisode(saved.start, current) : current;
-        endp.value = ranger.value = saved ? clampEpisode(saved.end, durations.length) : durations.length;
+        endp.value = endRange.value = saved ? clampEpisode(saved.end, durations.length) : durations.length;
     }
+    let first = clampEpisode(startp.value, current);
+    let last = clampEpisode(endp.value, durations.length);
+    if (first > last) [first, last] = [last, first];
+    startp.value = first;
+    endp.value = last;
+    endRange.value = activeEndpoint === 'start' ? first : last;
+    if (isCustomRange) rememberCustomRange();
+    stime.value = formatTime(durations.slice(first - 1, last).reduce((sum, seconds) => sum + seconds, 0));
     updateProgress(false);
 }
 
@@ -172,7 +193,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 async function calculate(reset = false, quickEnd = null) {
-    const controls = [btn_cal, btn_back, startp, endp, ranger];
+    const controls = [btn_cal, btn_back, startp, endp, endRange];
     controls.forEach(control => { control.disabled = true; });
     stime.value = !isCustomRange ? '正在读取播放进度' : '正在读取视频时长';
     try {
@@ -180,7 +201,7 @@ async function calculate(reset = false, quickEnd = null) {
         context = await readContext();
         const { durations, current, playback } = context;
         const count = durations.length;
-        startp.max = endp.max = ranger.max = count;
+        startp.max = endp.max = endRange.max = count;
         if (reset || (previous && (previous.bvid !== context.bvid || previous.group !== context.group))) {
             const saved = isCustomRange ? customRanges.get(rangeKey()) : null;
             startp.value = saved ? saved.start : current;
@@ -196,9 +217,10 @@ async function calculate(reset = false, quickEnd = null) {
             [first, last] = [last, first];
         }
         startp.value = first;
-        endp.value = ranger.value = last;
+        endp.value = last;
+        endRange.value = activeEndpoint === 'start' ? first : last;
         if (isCustomRange) rememberCustomRange();
-        ranger.min = endp.min = 1;
+        endRange.min = startp.min = endp.min = 1;
         updateProgress();
         if (!isCustomRange && !playback.ready) {
             stime.value = '正在读取播放进度，请稍后点击计算';
@@ -227,6 +249,10 @@ async function calculate(reset = false, quickEnd = null) {
 
 function editRange() {
     isCustomRange = true;
+    if (context) {
+        const selectedInput = activeEndpoint === 'start' ? startp : endp;
+        endRange.value = clampEpisode(selectedInput.value, context.durations.length);
+    }
     rememberCustomRange();
     updateRangeHint();
     stime.value = '区间已修改，请点击计算';
@@ -234,8 +260,8 @@ function editRange() {
 for (const input of [startp, endp]) {
     input.addEventListener('input', editRange);
 }
-ranger.addEventListener('input', function () {
-    endp.value = this.value;
+endRange.addEventListener('input', function () {
+    (activeEndpoint === 'start' ? startp : endp).value = this.value;
     editRange();
 });
 btn_cal.addEventListener('click', () => calculate());

@@ -7,15 +7,54 @@ let notificationToggle = document.getElementById('blockNotification');
 let menuToggle = document.getElementById('blockMenuItem');
 let markerInput = document.getElementById('markerInput');
 
+const floatingEnabled = document.getElementById('floatingEnabled');
+const floatingOpacity = document.getElementById('floatingOpacity');
+const floatingHideFullscreen = document.getElementById('floatingHideFullscreen');
+const floatingOpacityValue = document.getElementById('floatingOpacityValue');
+const floatingStatus = document.getElementById('floatingSettingsStatus');
+chrome.storage.sync.get({
+    BiliTimer_floatingEnabled: true,
+    BiliTimer_floatingOpacity: 100,
+    BiliTimer_floatingHideFullscreen: true
+}).then(data => {
+    floatingEnabled.checked = data.BiliTimer_floatingEnabled !== false;
+    floatingOpacity.value = Math.max(20, Math.min(100, Number(data.BiliTimer_floatingOpacity) || 100));
+    floatingOpacityValue.textContent = `${floatingOpacity.value}%`;
+    floatingHideFullscreen.checked = data.BiliTimer_floatingHideFullscreen !== false;
+    for (const control of [floatingEnabled, floatingOpacity, floatingHideFullscreen]) control.disabled = false;
+}).catch(() => { floatingStatus.textContent = '读取设置失败，请刷新选项页重试'; });
+
+async function saveFloatingSetting(key, value) {
+    try {
+        await chrome.storage.sync.set({ [key]: value });
+        floatingStatus.textContent = '已保存，已打开的视频页立即生效';
+    } catch {
+        floatingStatus.textContent = '保存失败，请重试';
+    }
+}
+floatingEnabled.addEventListener('change', () =>
+    saveFloatingSetting('BiliTimer_floatingEnabled', floatingEnabled.checked));
+floatingHideFullscreen.addEventListener('change', () =>
+    saveFloatingSetting('BiliTimer_floatingHideFullscreen', floatingHideFullscreen.checked));
+floatingOpacity.addEventListener('input', () => {
+    floatingOpacityValue.textContent = `${floatingOpacity.value}%`;
+});
+// 拖动结束才保存，避免滑块每移动一步就写入同步存储。
+floatingOpacity.addEventListener('change', () =>
+    saveFloatingSetting('BiliTimer_floatingOpacity', Number(floatingOpacity.value)));
+document.getElementById('resetFloatingPosition').addEventListener('click', async () => {
+    try {
+        await chrome.storage.local.remove('BiliTimer_floatingPosition');
+        floatingStatus.textContent = '位置已重置到页面右侧';
+    } catch {
+        floatingStatus.textContent = '重置失败，请重试';
+    }
+});
+
 // 获取blockNotification的值
 chrome.storage.sync.get('blockNotification', function (data) {
-    let blockNotification = data.blockNotification ? data.blockNotification : true;
-    // 如果showNotification为true，则将开关打开
-    if (blockNotification) {
-        notificationToggle.checked = true;
-    } else {
-        notificationToggle.checked = false;
-    }
+    // 勾选表示关闭通知；未设置时默认允许通知，与后台逻辑一致。
+    notificationToggle.checked = data.blockNotification ?? false;
 });
 // 绑定开关的change事件
 notificationToggle.addEventListener('change', function () {

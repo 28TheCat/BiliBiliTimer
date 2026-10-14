@@ -6,30 +6,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
-/* 
-* 创建InsertMarker
-*/
-chrome.contextMenus.create({
+const insertMarkerMenu = {
     id: 'InsertMarker',
     title: '标记一下',
-    contexts: ['link'], // 只在链接上显示此右键菜单
-    documentUrlPatterns: ['https://www.bilibili.com/video/*'] // 只在某些页面显示此右键菜单
+    contexts: ['link'],
+    documentUrlPatterns: ['https://www.bilibili.com/video/*']
+};
+
+const quickCopyMenu = {
+    id: 'QuickCopy',
+    title: '计算到此时长',
+    contexts: ['link'],
+    documentUrlPatterns: ['https://www.bilibili.com/video/*']
+};
+
+function syncQuickCopyMenu() {
+    chrome.storage.sync.get('blockMenuItem', function (data) {
+        if (data.blockMenuItem) {
+            chrome.contextMenus.remove('QuickCopy', () => {
+                // The item may already be absent; clear the expected API error.
+                void chrome.runtime.lastError;
+            });
+        } else {
+            chrome.contextMenus.create(quickCopyMenu, () => {
+                // The item may already exist when settings change or the worker starts.
+                void chrome.runtime.lastError;
+            });
+        }
+    });
+}
+
+// Context menu items survive service worker restarts. Create them only on install/update,
+// rather than at top level each time Chrome wakes the worker.
+chrome.runtime.onInstalled.addListener(() => {
+    chrome.contextMenus.removeAll(() => {
+        void chrome.runtime.lastError;
+        chrome.contextMenus.create(insertMarkerMenu);
+        syncQuickCopyMenu();
+    });
 });
 
-/* 
-* 关于创建右键菜单
-*/
-chrome.storage.sync.get('blockMenuItem', function (data) {
-    const blockMenuItem = data.blockMenuItem;
-    if (!blockMenuItem) {
-        chrome.contextMenus.create({
-            id: 'QuickCopy',
-            title: '计算到此时长',
-            contexts: ['link'], // 只在链接上显示此右键菜单
-            documentUrlPatterns: ['https://www.bilibili.com/video/*'] // 只在某些页面显示此右键菜单
-        });
-    } else {
-        chrome.contextMenus.remove('QuickCopy'); // 移除右键菜单选项
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName === 'sync' && changes.blockMenuItem) {
+        syncQuickCopyMenu();
     }
 });
 
