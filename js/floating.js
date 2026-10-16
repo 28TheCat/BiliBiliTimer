@@ -12,23 +12,23 @@
     const root = host.attachShadow({ mode: 'open' });
     root.innerHTML = `
         <style>
-            :host { all: initial; font: 13px/1.5 system-ui, sans-serif; }
+            :host { all: initial; --bili-pink: #fb7299; font: 13px/1.5 system-ui, sans-serif; }
             button { font: inherit; cursor: pointer; }
             #toggle { position: relative; display: grid; place-items: center; box-sizing: border-box;
-                width: 44px; height: 44px; border: 2px solid #d893ad; border-radius: 50%; padding: 0;
+                width: 44px; height: 44px; border: 2px solid var(--bili-pink); border-radius: 50%; padding: 0;
                 overflow: hidden; isolation: isolate; background: #fff0f5; color: #56253a;
                 box-shadow: 0 2px 10px #0003;
                 touch-action: none; user-select: none; }
-            #toggle:hover { border-color: #ad5574; }
+            #toggle:hover { border-color: #ff6699; }
             #toggle { cursor: grab; }
             :host(.dragging) { will-change: transform; }
             :host(.dragging) #toggle, :host(.dragging) #header { cursor: grabbing; }
             #toggle:focus-visible { outline: 2px solid #00a1d6; outline-offset: 3px; }
             #toggle.error { border-color: #e74c3c; }
             #water { position: absolute; bottom: 0; left: 0; width: 100%; height: var(--level, 0%);
-                background: #d893ad; transition: height .6s ease; pointer-events: none; }
+                background: var(--bili-pink); transition: height .6s ease; pointer-events: none; }
             .wave { position: absolute; top: -4px; left: 0; width: 80px; height: 8px;
-                fill: #d893ad; animation: wave 2.8s linear infinite; }
+                fill: var(--bili-pink); animation: wave 2.8s linear infinite; }
             .wave.back { top: -6px; opacity: .45; animation-duration: 4s; animation-direction: reverse; }
             #toggle[data-edge] .wave { display: none; }
             #percentage { position: relative; font: 700 11px/1 system-ui, sans-serif;
