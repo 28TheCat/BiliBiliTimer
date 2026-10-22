@@ -78,7 +78,8 @@
     const settings = {
         BiliTimer_floatingEnabled: true,
         BiliTimer_floatingOpacity: 100,
-        BiliTimer_floatingHideFullscreen: true
+        BiliTimer_floatingHideFullscreen: true,
+        BiliTimer_scope: 'all'
     };
 
     // 时长信息仅在切换 BV 时读取；每秒只读取本地播放器的当前位置。
@@ -87,13 +88,14 @@
     let progressRequest = false;
     let progressRetryAt = 0;
 
-    function showProgress(value) {
+    function showProgress(value, episodeOnly = settings.BiliTimer_scope === 'episode') {
         const valid = Number.isFinite(value);
         const percent = valid ? Math.max(0, Math.min(100, value)) : 0;
         toggle.style.setProperty('--level', `${percent}%`);
         toggle.toggleAttribute('data-edge', percent === 0 || percent === 100);
         percentage.textContent = valid ? `${Math.floor(percent)}%` : '--%';
-        const label = valid ? `观看进度 ${percent.toFixed(2)}%` : '正在读取观看进度';
+        const scope = episodeOnly ? '本集' : '全部分集';
+        const label = valid ? `${scope}进度 ${percent.toFixed(2)}%` : `正在读取${scope}进度`;
         toggle.setAttribute('aria-label', `${label}，点击查看剩余时长`);
         if (!drag && !toggle.classList.contains('error')) {
             toggle.title = `${label}，点击查看剩余时长，拖动调整位置`;
@@ -125,34 +127,10 @@
         }
         // 异步读取期间发生切集时，下一次刷新使用新地址。
         if (!progressVideo || location.href !== url.href || progressBvid !== bvid) return;
-        const { vtype, data } = progressVideo;
-        let durations;
-        let current = 1;
-        if (vtype === 2) {
-            durations = data.pages.map(page => page.duration);
-            current = Math.max(1, Number.parseInt(url.searchParams.get('p'), 10) || 1);
-        } else if (vtype === 3) {
-            const episodes = data.ugc_season.sections.find(section =>
-                section.episodes.some(episode => episode.aid === data.aid))?.episodes;
-            if (!episodes) { showProgress(null); return; }
-            durations = episodes.map(episode => episode.page.duration);
-            current = episodes.findIndex(episode => episode.aid === data.aid) + 1;
-        } else {
-            durations = [data.duration];
-        }
-        if (!durations.length || current > durations.length
-            || durations.some(seconds => !Number.isFinite(seconds) || seconds < 0)) {
-            showProgress(null);
-            return;
-        }
-        const video = document.querySelector(
-            '#bilibili-player video, #bilibili-player bwp-video, #bilibiliPlayer video, #bilibiliPlayer bwp-video'
-        ) || document.querySelector('video, bwp-video');
-        const elapsed = video && video.readyState >= 1 && !video.seeking && Number.isFinite(video.currentTime)
-            ? Math.max(0, Math.min(durations[current - 1], video.currentTime)) : 0;
-        const total = durations.reduce((sum, seconds) => sum + seconds, 0);
-        const done = durations.slice(0, current - 1).reduce((sum, seconds) => sum + seconds, 0) + elapsed;
-        showProgress(total > 0 ? done / total * 100 : null);
+        const playback = readPlaybackState();
+        const list = getVideoList(progressVideo, playback.page);
+        showProgress(getVideoProgress({ ...list, playback }, settings.BiliTimer_scope),
+            settings.BiliTimer_scope === 'episode' || list.durations.length === 1);
     }
 
     setInterval(() => { refreshProgress().catch(() => showProgress(null)); }, 1000);
@@ -287,20 +265,20 @@
         const height = event.data.height;
         if (!Number.isFinite(height) || height <= 0) return;
         panelHeight = height;
-        frame.style.height = `${Math.min(height, Math.max(80, window.innerHeight - 64))}px`;
-        place();
+        resizePanel();
     });
-    window.addEventListener('resize', () => {
+    function resizePanel() {
         if (frame) frame.style.height = `${Math.min(panelHeight, Math.max(80, window.innerHeight - 64))}px`;
         place();
-    });
+    }
+    window.addEventListener('resize', resizePanel);
     document.body.append(host);
     document.addEventListener('fullscreenchange', applySettings);
     chrome.storage.onChanged.addListener((changes, area) => {
         if (area === 'sync') {
             for (const key of Object.keys(settings)) {
                 if (changes[key]) settings[key] = changes[key].newValue
-                    ?? (key === 'BiliTimer_floatingOpacity' ? 100 : true);
+                    ?? (key === 'BiliTimer_scope' ? 'all' : key === 'BiliTimer_floatingOpacity' ? 100 : true);
             }
             applySettings();
         } else if (area === 'local' && changes.BiliTimer_floatingPosition) {

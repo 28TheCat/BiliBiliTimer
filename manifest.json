@@ -24,6 +24,7 @@
                 "https://api.bilibili.com/*"
             ],
             "js": [
+                "./js/video.js",
                 "./js/content.js",
                 "./js/calTime.js",
                 "./js/floating.js"

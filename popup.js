@@ -6,6 +6,9 @@ const endp = document.getElementById('p_end');
 const endRange = document.getElementById('endRange');
 const rangeLabel = document.getElementById('rangeLabel');
 const progress = document.getElementById('prgs');
+const scopeEpisode = document.getElementById('scope-episode');
+const scopeAll = document.getElementById('scope-all');
+let scope = 'all';
 let isCustomRange = false;
 let activeEndpoint = 'end';
 let context = null;
@@ -16,9 +19,6 @@ const panelParams = new URLSearchParams(window.location.search);
 const floating = panelParams.get('floating') === '1';
 const hostTabId = Number(panelParams.get('tabId'));
 
-startp.addEventListener('focus', function () { this.select(); });
-endp.addEventListener('focus', function () { this.select(); });
-
 function selectEndpoint(endpoint) {
     activeEndpoint = endpoint;
     rangeLabel.textContent = `滑动选择${endpoint === 'start' ? '起始' : '结束'}集`;
@@ -26,56 +26,55 @@ function selectEndpoint(endpoint) {
     if (context) endRange.value = clampEpisode(selectedInput.value,
         endpoint === 'start' ? context.current : context.durations.length);
 }
-startp.addEventListener('focus', () => selectEndpoint('start'));
-endp.addEventListener('focus', () => selectEndpoint('end'));
+for (const [input, endpoint] of [[startp, 'start'], [endp, 'end']]) {
+    input.addEventListener('focus', () => { input.select(); selectEndpoint(endpoint); });
+}
 
-// 每次点击重新读取页面状态，不启动定时器或监听播放事件。
-async function readContext() {
+async function getTimerTab() {
     const tab = floating && Number.isSafeInteger(hostTabId) && hostTabId > 0
         ? await chrome.tabs.get(hostTabId)
         : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
     if (!tab || !/^https:\/\/www\.bilibili\.com\/video\//.test(tab.url || '')) {
         throw new Error('请在 B 站视频播放页使用');
     }
+    return tab;
+}
+
+// 每次点击重新读取页面状态，不启动定时器或监听播放事件。
+async function readContext(reuseVideo = false) {
+    const tab = await getTimerTab();
     const snapshot = await chrome.tabs.sendMessage(tab.id, { action: 'GetPlaybackState' });
     if (!snapshot?.bvid) throw new Error('无法识别当前视频，请刷新视频页后重试');
+    // 切换范围只读取播放位置，继续使用面板内已有的时长信息。
+    if (reuseVideo && context?.tabId === tab.id && context.bvid === snapshot.bvid
+        && (context.sections || context.current === snapshot.page)) {
+        return { ...context, playback: snapshot };
+    }
     const result = await chrome.tabs.sendMessage(tab.id, {
         action: 'GetVideoInfo', bvid: snapshot.bvid
     });
-    if (!result?.data) throw new Error('无法获取视频时长，请重试');
+    if (!result?.data) throw new Error(result?.error || '无法获取视频时长，请重试');
     // 请求期间可能发生切集，使用最新状态；跨 BV 切换时请重新计算。
     const playback = await chrome.tabs.sendMessage(tab.id, { action: 'GetPlaybackState' });
     if (!playback || playback.bvid !== snapshot.bvid) throw new Error('视频已切换，请重新计算');
-    const { vtype, data } = result;
-    let durations;
-    let current = 1;
-    let group = '';
-    if (vtype === 2) {
-        durations = data.pages.map(page => page.duration);
-        current = playback.page;
-    } else if (vtype === 3) {
-        const section = data.ugc_season.sections.find(section =>
-            section.episodes.some(episode => episode.aid === data.aid));
-        if (!section) throw new Error('无法识别当前合集分组');
-        durations = section.episodes.map(episode => episode.page.duration);
-        current = section.episodes.findIndex(episode => episode.aid === data.aid) + 1;
-        group = section.title || '';
-    } else {
-        durations = [data.duration];
-    }
-    if (!durations.length || durations.some(seconds => !Number.isFinite(seconds) || seconds < 0)
-        || current < 1 || current > durations.length) {
-        throw new Error('视频时长或集数无效，请刷新视频页后重试');
-    }
-    return {
-        durations, current, playback, group, bvid: playback.bvid, tabId: tab.id,
-        sections: vtype === 3 ? data.ugc_season.sections : null
-    };
+    return { ...getVideoList(result, playback.page), playback, bvid: playback.bvid, tabId: tab.id };
 }
 
 function clampEpisode(value, fallback) {
     const number = Number.parseInt(value, 10);
     return Math.min(context.durations.length, Math.max(1, Number.isFinite(number) ? number : fallback));
+}
+
+function syncRange() {
+    startp.max = endp.max = endRange.max = context.durations.length;
+    let first = clampEpisode(startp.value, context.current);
+    let last = clampEpisode(endp.value, context.durations.length);
+    if (first > last) [first, last] = [last, first];
+    startp.value = first;
+    endp.value = last;
+    endRange.value = activeEndpoint === 'start' ? first : last;
+    if (isCustomRange) rememberCustomRange();
+    return [first, last];
 }
 
 function rangeKey() {
@@ -103,24 +102,56 @@ function formatTime(seconds) {
 }
 
 function updateRangeHint() {
-    document.getElementById('mode-info').textContent = !isCustomRange
+    const episodeOnly = isEpisodeScope();
+    document.getElementById('scope-switch').hidden = !context || context.durations.length === 1;
+    document.getElementById('episode-range').hidden = !context || episodeOnly;
+    for (const [button, selected] of [[scopeEpisode, episodeOnly], [scopeAll, !episodeOnly]]) {
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-pressed', String(selected));
+    }
+    btn_back.hidden = episodeOnly;
+    btn_cal.style.width = episodeOnly ? '100%' : '47%';
+    document.getElementById('mode-info').textContent = episodeOnly
+        ? '本集：计算当前播放位置到本集结束的剩余时长。' : !isCustomRange
         ? '默认计算当前位置到最后一集；修改集数后计算完整区间。'
         : '自定义区间：计算所选各集完整时长，包含首尾集。';
 }
 
+function isEpisodeScope() {
+    return scope === 'episode' || context?.durations.length === 1;
+}
+
+function applyScope(value) {
+    const next = value === 'episode' ? 'episode' : 'all';
+    if (scope === next) return;
+    scope = next;
+    updateRangeHint();
+    if (context && !btn_cal.disabled) calculate(false, null, true);
+}
+for (const [button, value] of [[scopeEpisode, 'episode'], [scopeAll, 'all']]) {
+    button.addEventListener('click', () => {
+        applyScope(value);
+        chrome.storage.sync.set({ BiliTimer_scope: value }).catch(() => {
+            stime.value = '范围已切换，但偏好保存失败，请重试';
+        });
+    });
+}
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'sync' && changes.BiliTimer_scope) applyScope(changes.BiliTimer_scope.newValue);
+});
+
 function updateProgress(includeCurrentTime = true) {
-    const { durations, current, playback, group } = context;
-    const total = durations.reduce((sum, seconds) => sum + seconds, 0);
-    const done = durations.slice(0, current - 1).reduce((sum, seconds) => sum + seconds, 0)
-        + (includeCurrentTime && playback.ready ? Math.min(durations[current - 1], playback.currentTime) : 0);
-    const width = total ? Math.min(100, done / total * 100).toFixed(2) : '0.00';
+    const { durations, current, group } = context;
+    const episodeOnly = isEpisodeScope();
+    const value = getVideoProgress(context, scope, includeCurrentTime);
+    const width = value === null ? '0.00' : value.toFixed(2);
     progress.style.width = `${width}%`;
     progress.setAttribute('aria-valuenow', width);
     document.getElementById('prgs_info').textContent =
-        `${includeCurrentTime ? '当前进度' : '集数进度'} ${width}% · 第 ${current}/${durations.length} 集${group ? ` · ${group}` : ''}`;
+        `${episodeOnly ? '本集进度' : '全部分集进度'} ${width}% · 第 ${current}/${durations.length} 集${group ? ` · ${group}` : ''}`;
 }
 
-// 仅弹窗打开期间响应 URL 变化；切集时复用时长，不请求接口或读取播放器。
+// 仅弹窗打开期间响应 URL 变化；已知列表内切集复用时长，新视频重新读取。
 function updateEpisodeProgress(url) {
     if (!context) return;
     let target;
@@ -163,7 +194,6 @@ function updateEpisodeProgress(url) {
     if (isCustomRange) rememberCustomRange();
     context = { ...context, bvid, current, durations, group,
         playback: { ready: false, currentTime: 0 } };
-    startp.max = endp.max = endRange.max = durations.length;
     if (!isCustomRange) {
         startp.value = current;
         endp.value = endRange.value = durations.length;
@@ -174,15 +204,11 @@ function updateEpisodeProgress(url) {
         startp.value = saved ? clampEpisode(saved.start, current) : current;
         endp.value = endRange.value = saved ? clampEpisode(saved.end, durations.length) : durations.length;
     }
-    let first = clampEpisode(startp.value, current);
-    let last = clampEpisode(endp.value, durations.length);
-    if (first > last) [first, last] = [last, first];
-    startp.value = first;
-    endp.value = last;
-    endRange.value = activeEndpoint === 'start' ? first : last;
-    if (isCustomRange) rememberCustomRange();
-    stime.value = formatTime(durations.slice(first - 1, last).reduce((sum, seconds) => sum + seconds, 0));
+    const [first, last] = syncRange();
+    stime.value = isEpisodeScope() ? '视频已切换，请点击计算读取本集剩余时长'
+        : formatTime(durations.slice(first - 1, last).reduce((sum, seconds) => sum + seconds, 0));
     updateProgress(false);
+    updateRangeHint();
 }
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -192,35 +218,41 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     else updateEpisodeProgress(changeInfo.url);
 });
 
-async function calculate(reset = false, quickEnd = null) {
-    const controls = [btn_cal, btn_back, startp, endp, endRange];
+async function calculate(reset = false, quickSelection = null, reuseVideo = false) {
+    const controls = [btn_cal, btn_back, startp, endp, endRange, scopeEpisode, scopeAll];
     controls.forEach(control => { control.disabled = true; });
     stime.value = !isCustomRange ? '正在读取播放进度' : '正在读取视频时长';
     try {
         const previous = context;
-        context = await readContext();
+        context = await readContext(reuseVideo);
         const { durations, current, playback } = context;
         const count = durations.length;
-        startp.max = endp.max = endRange.max = count;
+        // 获取视频数据后再次核对 BV，避免打开面板期间切换视频而套用旧集数。
+        const quickEnd = quickSelection?.bvid === context.bvid
+            && Number.isSafeInteger(quickSelection.episode) && quickSelection.episode > 0
+            ? quickSelection.episode : null;
+        if (quickEnd !== null) {
+            isCustomRange = true;
+            scope = 'all';
+            await chrome.storage.sync.set({ BiliTimer_scope: scope });
+        }
         if (reset || (previous && (previous.bvid !== context.bvid || previous.group !== context.group))) {
             const saved = isCustomRange ? customRanges.get(rangeKey()) : null;
             startp.value = saved ? saved.start : current;
             endp.value = saved ? saved.end : count;
         }
         if (quickEnd !== null) endp.value = quickEnd;
-        let first = clampEpisode(startp.value, current);
-        let last = clampEpisode(endp.value, count);
-        if (!isCustomRange) {
-            first = current;
-            last = count;
-        } else if (first > last) {
-            [first, last] = [last, first];
+        if (isEpisodeScope()) {
+            updateProgress();
+            stime.value = playback.ready ? formatTime(playback.duration - playback.currentTime)
+                : '正在读取播放进度，请稍后点击计算';
+            return;
         }
-        startp.value = first;
-        endp.value = last;
-        endRange.value = activeEndpoint === 'start' ? first : last;
-        if (isCustomRange) rememberCustomRange();
-        endRange.min = startp.min = endp.min = 1;
+        if (!isCustomRange) {
+            startp.value = current;
+            endp.value = count;
+        }
+        const [first, last] = syncRange();
         updateProgress();
         if (!isCustomRange && !playback.ready) {
             stime.value = '正在读取播放进度，请稍后点击计算';
@@ -273,11 +305,14 @@ btn_back.addEventListener('click', () => {
 
 async function initialize() {
     try {
-        // 右键指定结束集也视为用户自定义区间。
-        const { clipboardData } = await chrome.storage.local.get('clipboardData');
-        if (clipboardData) await chrome.storage.local.remove('clipboardData');
-        isCustomRange = Boolean(clipboardData);
-        await calculate(true, clipboardData || null);
+        const [tab, saved] = await Promise.all([
+            getTimerTab(), chrome.storage.sync.get({ BiliTimer_scope: 'all' })
+        ]);
+        scope = saved.BiliTimer_scope === 'episode' ? 'episode' : 'all';
+        const key = `BiliTimer_quickEnd_${tab.id}`;
+        const data = await chrome.storage.session.get(key);
+        if (data[key]) await chrome.storage.session.remove(key);
+        await calculate(true, data[key] || null);
     } catch (error) {
         stime.value = error.message || '初始化失败，请重试';
     }
